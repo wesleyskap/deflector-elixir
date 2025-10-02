@@ -1,0 +1,16 @@
+# Mix artifacts
+/_build/
+/cover/
+/doc/
+/deps/
+*.ez
+*.beam
+
+# System and editor
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+.gemini/
