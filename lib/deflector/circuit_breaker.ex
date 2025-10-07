@@ -9,13 +9,15 @@ defmodule Deflector.CircuitBreaker do
     :name,
     :state,
     :window,
-    :threshold,
+    :threshold_pct,
+    :min_volume,
     :reset_timeout,
     :last_state_change,
     :half_open_probes
   ]
 
-  @default_threshold 0.5
+  @default_threshold_pct 50
+  @default_min_volume 5
   @default_reset_timeout 5_000
 
   def start_link(opts) do
@@ -37,11 +39,15 @@ defmodule Deflector.CircuitBreaker do
 
   @impl true
   def init(opts) do
+    threshold_input = Keyword.get(opts, :threshold, 0.5)
+    threshold_pct = trunc(threshold_input * 100)
+
     state = %__MODULE__{
       name: Keyword.fetch!(opts, :name),
       state: :closed,
       window: Window.new(Keyword.get(opts, :window_size, 60)),
-      threshold: Keyword.get(opts, :threshold, @default_threshold),
+      threshold_pct: threshold_pct,
+      min_volume: Keyword.get(opts, :min_volume, @default_min_volume),
       reset_timeout: Keyword.get(opts, :reset_timeout, @default_reset_timeout),
       last_state_change: System.monotonic_time(:millisecond),
       half_open_probes: 0
@@ -136,7 +142,7 @@ defmodule Deflector.CircuitBreaker do
     {successes, failures} = Window.stats(state.window)
     total = successes + failures
 
-    if total >= 5 and failures / total >= state.threshold do
+    if total >= state.min_volume and (failures * 100) >= (total * state.threshold_pct) do
       %{state | state: :open, last_state_change: System.monotonic_time(:millisecond)}
     else
       state
