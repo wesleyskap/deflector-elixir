@@ -63,13 +63,17 @@ defmodule Deflector.Bulkhead do
       new_monitors = Map.put(state.monitors, from, ref)
       {:noreply, %{state | running: MapSet.put(state.running, from), monitors: new_monitors}}
     else
-      if :queue.len(state.queue) < state.max_queue do
-        queued = {from, fun, System.monotonic_time(:millisecond), timeout, ref}
-        {:noreply, %{state | queue: :queue.in(queued, state.queue)}}
-      else
-        Process.demonitor(ref, [:flush])
-        {:reply, {:error, :bulkhead_exhausted}, state}
-      end
+      enqueue_or_reject(fun, timeout, from, ref, state)
+    end
+  end
+
+  defp enqueue_or_reject(fun, timeout, from, ref, state) do
+    if :queue.len(state.queue) < state.max_queue do
+      queued = {from, fun, System.monotonic_time(:millisecond), timeout, ref}
+      {:noreply, %{state | queue: :queue.in(queued, state.queue)}}
+    else
+      Process.demonitor(ref, [:flush])
+      {:reply, {:error, :bulkhead_exhausted}, state}
     end
   end
 
