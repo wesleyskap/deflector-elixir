@@ -1,6 +1,6 @@
 defmodule Deflector.RateLimiter do
   @moduledoc """
-  High-throughput Token Bucket rate limiter with monotonic sub-millisecond precision.
+  High-throughput Token Bucket rate limiter with microsecond monotonic clock precision.
   """
   use GenServer
 
@@ -8,8 +8,8 @@ defmodule Deflector.RateLimiter do
     :name,
     :rate,
     :capacity,
-    :tokens,
-    :last_replenished
+    :tokens_micro,
+    :last_replenished_micro
   ]
 
   @default_rate 100
@@ -37,8 +37,8 @@ defmodule Deflector.RateLimiter do
       name: Keyword.fetch!(opts, :name),
       rate: rate,
       capacity: capacity,
-      tokens: capacity,
-      last_replenished: System.monotonic_time(:millisecond)
+      tokens_micro: capacity * 1_000_000,
+      last_replenished_micro: System.monotonic_time(:microsecond)
     }
 
     {:ok, state}
@@ -47,33 +47,32 @@ defmodule Deflector.RateLimiter do
   @impl true
   def handle_call(:get_tokens, _from, state) do
     state = replenish_tokens(state)
-    {:reply, state.tokens, state}
+    {:reply, div(state.tokens_micro, 1_000_000), state}
   end
 
   @impl true
   def handle_call({:acquire, count}, _from, state) do
     state = replenish_tokens(state)
+    needed_micro = count * 1_000_000
 
-    if state.tokens >= count do
-      new_tokens = state.tokens - count
-      {:reply, {:ok, new_tokens}, %{state | tokens: new_tokens}}
+    if state.tokens_micro >= needed_micro do
+      new_tokens_micro = state.tokens_micro - needed_micro
+      remaining = div(new_tokens_micro, 1_000_000)
+      {:reply, {:ok, remaining}, %{state | tokens_micro: new_tokens_micro}}
     else
       {:reply, {:error, :rate_limited}, state}
     end
   end
 
   defp replenish_tokens(state) do
-    now = System.monotonic_time(:millisecond)
-    elapsed_ms = now - state.last_replenished
+    now_micro = System.monotonic_time(:microsecond)
+    elapsed_micro = now_micro - state.last_replenished_micro
 
-    if elapsed_ms > 0 do
-      added_tokens = div(elapsed_ms * state.rate, 1_000)
-      if added_tokens > 0 do
-        new_tokens = min(state.capacity, state.tokens + added_tokens)
-        %{state | tokens: new_tokens, last_replenished: now}
-      else
-        state
-      end
+    if elapsed_micro > 0 do
+      added_micro = elapsed_micro * state.rate
+      max_capacity_micro = state.capacity * 1_000_000
+      new_tokens_micro = min(max_capacity_micro, state.tokens_micro + added_micro)
+      %{state | tokens_micro: new_tokens_micro, last_replenished_micro: now_micro}
     else
       state
     end
